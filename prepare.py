@@ -3,7 +3,7 @@ prepare.py — 資料準備與驗證
 
 步驟：
   1a. 將 rpg_dataset + literature_dataset 從 instruction/output 轉為 ShareGPT 格式
-      輸出至 datasets/lora_storyteller_extra/
+      輸出至 dataset/lora_storyteller_extra/
   1b. 所有資料集 90/10 train/val 分割（seed=1234）
   1c. 驗證每筆格式、報告 token 長度分佈
 
@@ -47,18 +47,18 @@ SYSTEM_PROMPTS = {
     ),
 }
 
-DATASETS = {
-    "lora_storyteller": "datasets/lora_storyteller/lora_storyteller.jsonl",
+DATASET = {
+    "lora_storyteller": "dataset/lora_storyteller/lora_storyteller.jsonl",
     "lora_storyteller_extra": None,   # generated in step 1a
-    "lora_analyst":     "datasets/lora_analyst/lora_analyst.jsonl",
-    "lora_translator":  "datasets/lora_translator/lora_translator.jsonl",
+    "lora_analyst":     "dataset/lora_analyst/lora_analyst.jsonl",
+    "lora_translator":  "dataset/lora_translator/lora_translator.jsonl",
 }
 
 RAW_SOURCES = [
-    "datasets/rpg_dataset/rpg_dataset.jsonl",
-    "datasets/literature_dataset/literature_dataset.jsonl",
+    "dataset/rpg_dataset/rpg_dataset.jsonl",
+    "dataset/literature_dataset/literature_dataset.jsonl",
 ]
-EXTRA_OUTPUT = "datasets/lora_storyteller_extra/lora_storyteller_extra.jsonl"
+EXTRA_OUTPUT = "dataset/lora_storyteller_extra/lora_storyteller_extra.jsonl"
 
 # ── 工具函式 ──────────────────────────────────────────────────────────────────
 
@@ -143,11 +143,11 @@ def step_1a_convert():
 def step_1b_split():
     print("\n=== Step 1b：Train/Val 分割（90/10, seed=1234）===")
 
-    # 更新 DATASETS 中的 extra 路徑
-    datasets = dict(DATASETS)
-    datasets["lora_storyteller_extra"] = EXTRA_OUTPUT
+    # 更新 DATASET 中的 extra 路徑
+    dataset = dict(DATASET)
+    dataset["lora_storyteller_extra"] = EXTRA_OUTPUT
 
-    for name, src_path in datasets.items():
+    for name, src_path in dataset.items():
         if src_path is None or not Path(src_path).exists():
             print(f"  [SKIP] {name}：找不到 {src_path}")
             continue
@@ -155,7 +155,7 @@ def step_1b_split():
         items = read_jsonl(src_path)
         train, val = split_dataset(items, SPLIT_RATIO, SEED)
 
-        base_dir = f"datasets/{name}"
+        base_dir = f"dataset/{name}"
         train_path = f"{base_dir}/{name}_train.jsonl"
         val_path   = f"{base_dir}/{name}_val.jsonl"
 
@@ -220,14 +220,14 @@ def validate_dataset(name: str, path: str) -> dict:
 def step_1c_validate():
     print("\n=== Step 1c：資料驗證 ===")
 
-    datasets = dict(DATASETS)
-    datasets["lora_storyteller_extra"] = EXTRA_OUTPUT
+    dataset = dict(DATASET)
+    dataset["lora_storyteller_extra"] = EXTRA_OUTPUT
 
     all_ok = True
-    for name, src_path in datasets.items():
+    for name, src_path in dataset.items():
         # 優先驗證 train 分割
-        train_path = f"datasets/{name}/{name}_train.jsonl"
-        val_path   = f"datasets/{name}/{name}_val.jsonl"
+        train_path = f"dataset/{name}/{name}_train.jsonl"
+        val_path   = f"dataset/{name}/{name}_val.jsonl"
 
         for label, path in [("train", train_path), ("val", val_path)]:
             if not Path(path).exists():

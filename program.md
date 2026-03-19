@@ -12,7 +12,7 @@
 | `train_lora.py` | 核心訓練腳本，帶 CLI 參數 | **可調整**（實驗主體） |
 | `evaluate.py` | 載入 adapter、計算 perplexity、生成樣本 | 唯讀（評估指標固定） |
 | `results.tsv` | 實驗紀錄（自動附加） | 唯讀（只能讀取） |
-| `datasets/` | 分割好的 train/val JSONL | 唯讀 |
+| `dataset/` | 分割好的 train/val JSONL | 唯讀 |
 | `outputs/lora_{task}/` | 訓練輸出、eval_report.json | 讀/寫 |
 
 ---

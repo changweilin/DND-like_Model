@@ -1,0 +1,2 @@
+timestamp	task	rank	alpha	lr	epochs	max_steps	train_loss	eval_loss	peak_memory_gb	status	description
+2026-03-20T00:17:29	analyst	16	32	0.0003	2	10	2.4336	0.0203	6.49	ok	

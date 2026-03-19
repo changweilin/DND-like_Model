@@ -32,7 +32,7 @@ TASK_PRESETS = {
         "lora_alpha":   64,
         "learning_rate": 2e-5,
         "num_epochs":   3,
-        "dataset_dir":  "datasets/lora_storyteller",
+        "dataset_dir":  "dataset/lora_storyteller",
         "output_dir":   "outputs/lora_storyteller",
     },
     "storyteller_extra": {
@@ -40,7 +40,7 @@ TASK_PRESETS = {
         "lora_alpha":   64,
         "learning_rate": 2e-5,
         "num_epochs":   3,
-        "dataset_dir":  "datasets/lora_storyteller_extra",
+        "dataset_dir":  "dataset/lora_storyteller_extra",
         "output_dir":   "outputs/lora_storyteller_extra",
     },
     "translator": {
@@ -48,7 +48,7 @@ TASK_PRESETS = {
         "lora_alpha":   128,
         "learning_rate": 1e-4,
         "num_epochs":   2,
-        "dataset_dir":  "datasets/lora_translator",
+        "dataset_dir":  "dataset/lora_translator",
         "output_dir":   "outputs/lora_translator",
     },
     "analyst": {
@@ -56,7 +56,7 @@ TASK_PRESETS = {
         "lora_alpha":   32,
         "learning_rate": 3e-4,
         "num_epochs":   2,
-        "dataset_dir":  "datasets/lora_analyst",
+        "dataset_dir":  "dataset/lora_analyst",
         "output_dir":   "outputs/lora_analyst",
     },
 }

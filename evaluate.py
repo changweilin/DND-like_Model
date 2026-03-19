@@ -26,19 +26,19 @@ from unsloth.chat_templates import get_chat_template
 TASK_CONFIG = {
     "storyteller": {
         "adapter_path": "outputs/lora_storyteller",
-        "val_path":     "datasets/lora_storyteller/lora_storyteller_val.jsonl",
+        "val_path":     "dataset/lora_storyteller/lora_storyteller_val.jsonl",
     },
     "storyteller_extra": {
         "adapter_path": "outputs/lora_storyteller_extra",
-        "val_path":     "datasets/lora_storyteller_extra/lora_storyteller_extra_val.jsonl",
+        "val_path":     "dataset/lora_storyteller_extra/lora_storyteller_extra_val.jsonl",
     },
     "translator": {
         "adapter_path": "outputs/lora_translator",
-        "val_path":     "datasets/lora_translator/lora_translator_val.jsonl",
+        "val_path":     "dataset/lora_translator/lora_translator_val.jsonl",
     },
     "analyst": {
         "adapter_path": "outputs/lora_analyst",
-        "val_path":     "datasets/lora_analyst/lora_analyst_val.jsonl",
+        "val_path":     "dataset/lora_analyst/lora_analyst_val.jsonl",
     },
 }
 
