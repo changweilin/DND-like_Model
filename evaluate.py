@@ -22,6 +22,11 @@ from datasets import load_dataset
 from unsloth import FastLanguageModel
 from unsloth.chat_templates import get_chat_template
 
+try:
+    import google.generativeai as genai
+except ImportError:
+    genai = None
+
 # ── 任務設定 ──────────────────────────────────────────────────────────────────
 # adapter_path_rl: GRPO 訓練後的 adapter 路徑（可選）
 
@@ -87,6 +92,10 @@ def parse_args():
     parser.add_argument(
         "--max-new-tokens", type=int, default=256,
         help="生成時最大新 token 數（預設 256）",
+    )
+    parser.add_argument(
+        "--llm-judge", action="store_true",
+        help="使用 Gemini 作為 LLM Judge 進行自動化文風與翻譯品質評估",
     )
     return parser.parse_args()
 
@@ -384,6 +393,55 @@ def check_storyteller(model, tokenizer, val_path: str, n: int, max_new_tokens: i
     return {"samples": samples}
 
 
+# ── LLM Judge ─────────────────────────────────────────────────────────────────
+
+def run_llm_judge(samples: list[dict], task: str) -> dict:
+    if genai is None:
+        print("[WARN] 未安裝 google-generativeai，略過 LLM Judge。請執行 pip install google-generativeai")
+        return {"error": "Module not installed"}
+
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        print("[WARN] 未設定 GEMINI_API_KEY，略過 LLM Judge。")
+        return {"error": "No API Key"}
+
+    genai.configure(api_key=api_key)
+    # 使用 2.5 flash 作為高CP值的 judge
+    model = genai.GenerativeModel("gemini-2.5-flash")
+
+    prompt = ""
+    if task in ("storyteller", "storyteller_extra"):
+        prompt = "你是一位專業的 TRPG 遊戲文字敘事評審。\n"
+        prompt += "請根據以下三個面向為每個故事接龍樣本評分，每個面向 0~5 分，總分滿分 15 分：文學性(生動描寫與氛圍)、連貫性(與前文脈絡相符)、角色聲音(對話符合個性)。\n"
+        prompt += "請在 'comment' 中給予一句短評，最後在 'overall' 給予整體建議。\n"
+        prompt += "請務必回傳 JSON 格式如下：\n"
+        prompt += '{"samples": [{"score": 12, "comment": "氛圍佳但結尾倉促"}], "overall": "整體建議..."}\n\n'
+        for i, s in enumerate(samples):
+            prompt += f"【樣本 {i+1}】\nPrompt: {s['prompt']}\nGenerated: {s['generated']}\n\n"
+    elif task == "translator":
+        prompt = "你是一位專業的 TRPG 遊戲本地化翻譯評審。\n"
+        prompt += "請根據以下兩個面向為每個翻譯樣本評分，每個面向 0~5 分，總分滿分 10 分：忠實度(語意正確傳達)、流暢度(目標語言自然)。\n"
+        prompt += "請在 'comment' 中給予一句短評，最後在 'overall' 給予整體建議。\n"
+        prompt += "請務必回傳 JSON 格式如下：\n"
+        prompt += '{"samples": [{"score": 9, "comment": "翻譯流暢且精確"}], "overall": "整體建議..."}\n\n'
+        for i, s in enumerate(samples):
+            prompt += f"【樣本 {i+1}】\nRef(參考): {s.get('reference', '')}\nGenerated(生成): {s['generated']}\n\n"
+    else:
+        return {}
+
+    try:
+        response = model.generate_content(
+            prompt,
+            generation_config=genai.GenerationConfig(
+                response_mime_type="application/json",
+            )
+        )
+        return json.loads(response.text)
+    except Exception as e:
+        print(f"[WARN] LLM Judge 呼叫或解析失敗: {e}")
+        return {"error": str(e)}
+
+
 # ── 主流程 ────────────────────────────────────────────────────────────────────
 
 def main():
@@ -475,6 +533,13 @@ def main():
         quality_check = check_storyteller(model, tokenizer, val_path, n, args.max_new_tokens)
         print(f"  已生成 {len(quality_check['samples'])} 筆接龍範例")
 
+    if args.llm_judge and args.task in ("storyteller", "storyteller_extra", "translator"):
+        print("\n執行 LLM Judge (Gemini) 評估...")
+        judge_result = run_llm_judge(quality_check.get("samples", []), args.task)
+        quality_check["llm_judge"] = judge_result
+        if "overall" in judge_result:
+            print(f"  [LLM Judge] 整體建議：{judge_result['overall']}")
+
     # ── 輸出報告 ──────────────────────────────────────────────────────────────
     report = {
         "task":        args.task,
@@ -509,6 +574,13 @@ def main():
                 if "reference" in s:
                     f.write(f"    Ref:     {s['reference']}\n")
                 f.write(f"    Generated: {s.get('generated','')}\n")
+
+        if "llm_judge" in quality_check and "samples" in quality_check["llm_judge"]:
+            f.write(f"\n--- LLM Judge (Gemini) ---\n")
+            f.write(f"整體建議: {quality_check['llm_judge'].get('overall', '')}\n")
+            for i, res in enumerate(quality_check["llm_judge"]["samples"], 1):
+                f.write(f"[{i}] Score: {res.get('score')} | Comment: {res.get('comment')}\n")
+
     print(f"[Report] 純文字摘要已儲存至 {txt_path}")
 
     # 結構化摘要行
@@ -538,6 +610,11 @@ def main():
     elif args.task == "translator":
         if quality_check.get("avg_bleu") is not None:
             eval_summary["avg_bleu"] = quality_check["avg_bleu"]
+
+    if "llm_judge" in quality_check and "samples" in quality_check["llm_judge"]:
+        scores = [s.get("score", 0) for s in quality_check["llm_judge"].get("samples", []) if isinstance(s.get("score"), (int, float))]
+        if scores:
+            eval_summary["llm_judge_avg_score"] = round(sum(scores) / len(scores), 2)
 
     print("\n[EVAL_JSON]")
     print(json.dumps(eval_summary, ensure_ascii=False))

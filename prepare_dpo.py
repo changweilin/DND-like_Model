@@ -21,7 +21,21 @@ prepare_dpo.py — DPO 偏好對資料集生成
 
 import json
 import random
+import os
+import time
+import argparse
 from pathlib import Path
+
+try:
+    from tqdm import tqdm
+except ImportError:
+    # fallback if tqdm is not installed
+    tqdm = lambda x, **kwargs: x
+
+try:
+    import google.generativeai as genai
+except ImportError:
+    genai = None
 
 # ── 常數 ──────────────────────────────────────────────────────────────────────
 
@@ -69,9 +83,30 @@ def split_dataset(items: list[dict], ratio: float, seed: int) -> tuple[list, lis
     return shuffled[:cut], shuffled[cut:]
 
 
+def generate_rejected_with_llm(prompt_text: str, chosen: str, model) -> str:
+    instructions = "你現在是一個會故意寫出較差版本的助手。\n"
+    instructions += "請根據以下的高品質回應(chosen)，寫出一個品質較差的版本(rejected)。\n"
+    instructions += "你可以選擇讓文字變成流水帳、缺乏文學性、邏輯斷裂、或是角色聲音消失(變成旁白)。\n"
+    instructions += "請直接回傳較差的文字內容，不要有任何前綴或解釋。\n\n"
+    instructions += f"【原始 Prompt】\n{prompt_text}\n\n"
+    instructions += f"【高品質回應】\n{chosen}\n"
+
+    for attempt in range(3):
+        try:
+            response = model.generate_content(instructions)
+            return response.text.strip()
+        except Exception as e:
+            if "429" in str(e) or "Quota" in str(e):
+                time.sleep(5 * (attempt + 1))
+            else:
+                print(f"  [WARN] LLM 生成失敗: {e}")
+                break
+    return ""
+
+
 # ── DPO 偏好對構造 ────────────────────────────────────────────────────────────
 
-def build_dpo_pairs(items: list[dict], seed: int) -> list[dict]:
+def build_dpo_pairs(items: list[dict], seed: int, use_llm: bool = False, limit: int = None) -> list[dict]:
     """
     對每筆資料構造一個 DPO 偏好對：
       - chosen  = 本筆的 gpt 回應（原本正確的故事接龍）
@@ -96,7 +131,29 @@ def build_dpo_pairs(items: list[dict], seed: int) -> list[dict]:
 
     pairs = []
     skipped = 0
-    for i, item in enumerate(items):
+
+    if limit is not None:
+        items = items[:limit]
+        n = len(items)
+
+    model = None
+    if use_llm:
+        if genai is None:
+            print("[WARN] 未安裝 google-generativeai，降級使用隨機抽樣。")
+            use_llm = False
+        else:
+            api_key = os.environ.get("GEMINI_API_KEY")
+            if not api_key:
+                print("[WARN] 未設定 GEMINI_API_KEY，降級使用隨機抽樣。")
+                use_llm = False
+            else:
+                genai.configure(api_key=api_key)
+                model = genai.GenerativeModel("gemini-2.5-flash")
+                print("  [INFO] 啟用 LLM 輔助生成 Rejected 樣本 (Gemini)")
+
+    iterator = tqdm(items, desc="生成 DPO Pairs") if use_llm else items
+
+    for i, item in enumerate(iterator):
         convos  = item.get("conversations", [])
         chosen  = responses[i]
 
@@ -107,13 +164,20 @@ def build_dpo_pairs(items: list[dict], seed: int) -> list[dict]:
             skipped += 1
             continue
 
-        # 從不同索引中隨機選 rejected
-        candidates   = [j for j in range(n) if j != i and responses[j].strip()]
-        if not candidates:
-            skipped += 1
-            continue
-        rejected_idx = rng.choice(candidates)
-        rejected     = responses[rejected_idx]
+        rejected = ""
+        if use_llm and model:
+            prompt_str = "\n".join([f"{c['from']}: {c['value']}" for c in prompt_convos])
+            rejected = generate_rejected_with_llm(prompt_str, chosen, model)
+            time.sleep(1.0) # 為了避免超過 API 速率限制
+
+        # 從不同索引中隨機選 rejected (如果沒用 LLM 或 LLM 失敗的話)
+        if not rejected:
+            candidates   = [j for j in range(len(responses)) if j != i and responses[j].strip()]
+            if not candidates:
+                skipped += 1
+                continue
+            rejected_idx = rng.choice(candidates)
+            rejected     = responses[rejected_idx]
 
         pairs.append({
             "conversations": prompt_convos,
@@ -129,7 +193,14 @@ def build_dpo_pairs(items: list[dict], seed: int) -> list[dict]:
 
 # ── 主程式 ────────────────────────────────────────────────────────────────────
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="DPO 偏好對資料集生成")
+    parser.add_argument("--use-llm", action="store_true", help="使用 Gemini 生成 rejected 回應")
+    parser.add_argument("--limit", type=int, default=None, help="限制處理筆數（測試用）")
+    return parser.parse_args()
+
 def main():
+    args = parse_args()
     print("=" * 60)
     print("prepare_dpo.py — DPO 偏好對資料集生成")
     print("=" * 60)
@@ -151,7 +222,7 @@ def main():
     print(f"\n  合計：{len(all_items)} 筆原始資料")
 
     # 構造 DPO 偏好對
-    pairs = build_dpo_pairs(all_items, seed=SEED)
+    pairs = build_dpo_pairs(all_items, seed=SEED, use_llm=args.use_llm, limit=args.limit)
     print(f"  生成 DPO 偏好對：{len(pairs)} 筆")
 
     # 儲存完整資料集
