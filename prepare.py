@@ -48,10 +48,11 @@ SYSTEM_PROMPTS = {
 }
 
 DATASET = {
-    "lora_storyteller": "dataset/lora_storyteller/lora_storyteller.jsonl",
+    "lora_storyteller":       "dataset/lora_storyteller/lora_storyteller.jsonl",
     "lora_storyteller_extra": None,   # generated in step 1a
-    "lora_analyst":     "dataset/lora_analyst/lora_analyst.jsonl",
-    "lora_translator":  "dataset/lora_translator/lora_translator.jsonl",
+    "lora_analyst":           "dataset/lora_analyst/lora_analyst.jsonl",
+    "lora_translator":        "dataset/lora_translator/lora_translator.jsonl",
+    "lora_reasoning":         "dataset/lora_reasoning/lora_reasoning.jsonl",
 }
 
 RAW_SOURCES = [

@@ -59,6 +59,14 @@ TASK_PRESETS = {
         "dataset_dir":  "dataset/lora_analyst",
         "output_dir":   "outputs/lora_analyst",
     },
+    "reasoning": {
+        "lora_rank":    32,
+        "lora_alpha":   64,
+        "learning_rate": 1e-4,
+        "num_epochs":   3,
+        "dataset_dir":  "dataset/lora_reasoning",
+        "output_dir":   "outputs/lora_reasoning",
+    },
 }
 
 MODEL_NAME = "unsloth/Qwen2.5-7B-Instruct-bnb-4bit"
