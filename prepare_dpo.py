@@ -22,6 +22,7 @@ prepare_dpo.py — DPO 偏好對資料集生成
 import json
 import random
 import os
+import sys
 import time
 import argparse
 from pathlib import Path
@@ -36,6 +37,16 @@ try:
     import google.generativeai as genai
 except ImportError:
     genai = None
+
+# ── API 用量追蹤 ───────────────────────────────────────────────────────────────
+try:
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from api_tracker import check_quota, record_call as _record_api
+    _API_TRACKER = True
+except ImportError:
+    _API_TRACKER = False
+    def check_quota(api, **kw): return True
+    def _record_api(api): pass
 
 # ── 常數 ──────────────────────────────────────────────────────────────────────
 
@@ -93,6 +104,10 @@ def generate_rejected_with_llm(prompt_text: str, chosen: str, model) -> str:
 
     for attempt in range(3):
         try:
+            if not check_quota("gemini-2.5-flash", raise_on_exceed=False):
+                print("  [WARN] Gemini 2.5 Flash 今日配額已滿，停止 LLM 生成。")
+                return ""
+            _record_api("gemini-2.5-flash")
             response = model.generate_content(instructions)
             return response.text.strip()
         except Exception as e:

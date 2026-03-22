@@ -114,6 +114,54 @@ python evaluate.py --task reasoning --rl
 
 ---
 
+## 📋 訓練進度追蹤
+
+### Phase 1 — SFT 狀態（全部完成 ✅）
+
+| 任務 | 狀態 | train_loss | peak_mem | 完成日期 |
+| :--- | :--- | :--- | :--- | :--- |
+| `analyst` | ✅ 完成 | 2.43 (10 steps) | 6.49 GB | 2026-03-20 |
+| `reasoning` | ✅ 完成 | 0.064 | 6.92 GB | 2026-03-22 |
+| `storyteller` | ✅ 完成 | 0.239 | 6.91 GB | 2026-03-22 |
+| `storyteller_extra` | ✅ 完成 | 0.049 | 7.76 GB | 2026-03-22 |
+| `translator` | ✅ 完成 | 0.051 | 7.76 GB | 2026-03-22 |
+
+> ⚠️ **analyst SFT 注意**：訓練僅 10 steps（smoke test）；eval 顯示模型輸出退化為 base model 預設回應。
+> 建議 Phase 2 GRPO 完成後重新評估，或補跑完整 SFT。
+
+**批次執行（自動 OOM 降參）：**
+```bash
+python run_sft_all.py               # 全部跑
+python run_sft_all.py --skip-existing   # 跳過已完成
+python run_sft_all.py --tasks reasoning storyteller  # 指定任務
+```
+
+### Phase 2 — RL 對齊狀態
+
+| 任務 | 方法 | 狀態 | 輸出路徑 |
+| :--- | :--- | :--- | :--- |
+| `analyst` | GRPO | 🔄 訓練中 | `outputs/lora_analyst_grpo/` |
+| `reasoning` | GRPO | ⏳ 待執行 | `outputs/lora_reasoning_grpo/` |
+| `translator` | GRPO | ⏳ 待執行 | `outputs/lora_translator_grpo/` |
+| `storyteller` | DPO | ⏳ 待執行 | `outputs/lora_storyteller_dpo/` |
+
+### 前置作業（已完成）
+
+- **Step 0 — 資料集轉移**：全部資料集已於 2026-03-20 複製至 `dataset/` 目錄並驗證完整性。
+- **Step 1 — DPO 偏好對準備**：`prepare_dpo.py` 已完成，DPO 訓練資料位於 `dataset/lora_storyteller_dpo/`。
+
+### AutoResearch 狀態（✅ 已支援多後端）
+
+`autoresearch.py` 現支援三種 LLM 顧問後端，透過 `--advisor` 參數切換：
+
+| `--advisor` | 後端 | 需求 |
+| :--- | :--- | :--- |
+| `gemini`（預設）| Gemini API (`google.generativeai`) | `GEMINI_API_KEY` |
+| `claude-api` | Claude Anthropic API (`anthropic`) | `ANTHROPIC_API_KEY` |
+| `subagent` | Claude Code CLI sub-agent | `claude` 在 PATH |
+
+---
+
 ## 💻 資源管理與優化 (RTX 3060 12GB)
 
 1. **Unsloth 4-bit 量化**: 預設載入 4-bit 量化基座模型，節省約 60% VRAM。
@@ -121,6 +169,7 @@ python evaluate.py --task reasoning --rl
 3. **梯度累積**: 為了在單卡達成有效 Batch Size，預設使用 `gradient_accumulation_steps=4~8`。
 
 如果您在訓練中遇到 `Out of Memory`，請優先嘗試：
+
 - 降低 `--max-steps` (僅用於測試) 或縮短 `--max-seq-len`。
 - 關閉所有背景佔用 VRAM 的程式。
 - 對於 GRPO，降低 `--num-generations`。

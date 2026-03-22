@@ -20,6 +20,9 @@
 | `outputs/lora_{task}/` | SFT adapter 輸出 | 讀/寫 |
 | `outputs/lora_{task}_grpo/` | GRPO adapter 輸出 | 讀/寫 |
 | `outputs/lora_{task}_dpo/` | DPO adapter 輸出 | 讀/寫 |
+| `deploy_lora.py` | LoRA → GGUF → Ollama 部署工具 | 唯讀 |
+| `outputs/gguf_{task}/` | GGUF 匯出目錄（含 Modelfile） | 讀/寫 |
+| `outputs/deploy_state.json` | 部署狀態追蹤 | 讀/寫 |
 
 ---
 
@@ -47,6 +50,11 @@ Phase 3：評估與比較
   evaluate.py --task {T}          (SFT 基準)
   evaluate.py --task {T} --rl     (GRPO 版本)
   evaluate.py --task {T} --dpo    (DPO 版本，僅 storyteller)
+
+Phase 4：部署至 DND-like_RPG
+  deploy_lora.py --task {T}                    (單一任務，預設 q4_k_m)
+  deploy_lora.py --all --update-config         (所有任務，更新 RPG config.py)
+  deploy_lora.py --status                      (查看部署狀態)
 ```
 
 ---
@@ -149,6 +157,12 @@ python evaluate.py --task storyteller --dpo
 # ── Phase 3：比較基準（零樣本 base model）────────────────────────────
 python evaluate.py --task analyst --base-model
 python evaluate.py --task reasoning --base-model
+
+# ── Phase 4：部署至 Ollama / DND-like_RPG ────────────────────────────
+python deploy_lora.py --status                          # 確認哪些 adapter 可部署
+python deploy_lora.py --task analyst                    # 單一任務部署
+python deploy_lora.py --task storyteller --update-config # 部署並更新 RPG config.py
+python deploy_lora.py --all --update-config             # 部署全部並更新 config
 ```
 
 ---
@@ -265,6 +279,48 @@ timestamp	task	mode	rank	alpha	lr	num_generations	max_completion	kl_coeff	epochs
 ### storyteller_extra（補充語料）
 - SFT：rank=64, alpha=64, lr=2e-5, epochs=3
 - 可與 storyteller 對比 eval_loss，判斷補充語料是否有幫助
+
+---
+
+## AutoResearch 自動化工具
+
+### autoresearch.py — 自動超參數實驗迴圈
+
+仿照 Karpathy's autoresearch，以 Claude API 自動分析歷史結果並建議下一組超參數。
+
+```bash
+# 環境設定
+set ANTHROPIC_API_KEY=your_key_here
+
+# SFT 自動實驗（每次 ~5 分鐘，共 5 次）
+python autoresearch.py --task analyst --mode sft
+
+# GRPO 自動實驗
+python autoresearch.py --task reasoning --mode grpo --max-iterations 3
+
+# 完整訓練模式（每次數小時）
+python autoresearch.py --task analyst --mode sft --full
+
+# 查看歷史迭代紀錄
+python autoresearch.py --list
+```
+
+記錄檔：`autoresearch_log.jsonl`
+
+---
+
+### experiment_tracker.py — 實驗視覺化分析器
+
+依賴：`pip install rich`
+
+```bash
+python experiment_tracker.py                     # 全部任務 SFT + RL 表格
+python experiment_tracker.py --task analyst      # 只看 analyst
+python experiment_tracker.py --best              # 各任務最佳結果總覽
+python experiment_tracker.py --compare --task analyst  # SFT vs RL 比較
+python experiment_tracker.py --ar                # AutoResearch 迭代紀錄
+python experiment_tracker.py --html              # 輸出 HTML 趨勢報告
+```
 
 ---
 

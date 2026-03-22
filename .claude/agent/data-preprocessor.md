@@ -22,4 +22,5 @@ Trigger on: "prepare data", "convert dataset", "check tokens", "split training d
 - **Output analysis**: Check stdout for "[OK]" or "[WARN]" status per task.
 
 ## Persistent Data
-- Log conversion issues and token length distributions in `.claude/data/preprocessor.log` for trend analysis across data additions.
+- Log conversion issues and token length distributions in `${CLAUDE_PLUGIN_DATA}/preprocessor.log` for trend analysis across data additions.
+- Also note: RLVR cleaned datasets are stored in `dataset/finetune/sharegpt/cleaned/` — these are the post-filtering outputs used for Phase 2 RL training, not raw SFT data.

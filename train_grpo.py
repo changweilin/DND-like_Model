@@ -416,7 +416,7 @@ def main():
         bf16=is_bfloat16_supported(),
         optim="adamw_8bit",
         # KL 懲罰（防止 reward hacking）
-        kl_coeff=preset["kl_coeff"],
+        beta=preset["kl_coeff"],
         # 記錄與儲存
         logging_steps=5,
         save_strategy="epoch",

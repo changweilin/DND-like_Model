@@ -16,8 +16,19 @@ import math
 import os
 import re
 import sys
+from pathlib import Path
 
 import torch
+
+# ── API 用量追蹤 ───────────────────────────────────────────────────────────────
+try:
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from api_tracker import check_quota, record_call as _record_api
+    _API_TRACKER = True
+except ImportError:
+    _API_TRACKER = False
+    def check_quota(api, **kw): return True
+    def _record_api(api): pass
 from datasets import load_dataset
 from unsloth import FastLanguageModel
 from unsloth.chat_templates import get_chat_template
@@ -184,6 +195,7 @@ def generate_response(model, tokenizer, convos: list[dict], max_new_tokens: int)
             max_new_tokens=max_new_tokens,
             do_sample=False,
             pad_token_id=tokenizer.eos_token_id,
+            use_cache=False,
         )
     generated = outputs[0][inputs["input_ids"].shape[1]:]
     return tokenizer.decode(generated, skip_special_tokens=True)
@@ -430,6 +442,8 @@ def run_llm_judge(samples: list[dict], task: str) -> dict:
         return {}
 
     try:
+        check_quota("gemini-2.5-flash")
+        _record_api("gemini-2.5-flash")
         response = model.generate_content(
             prompt,
             generation_config=genai.GenerationConfig(
@@ -437,6 +451,9 @@ def run_llm_judge(samples: list[dict], task: str) -> dict:
             )
         )
         return json.loads(response.text)
+    except RuntimeError as e:
+        print(f"[WARN] {e}")
+        return {"error": str(e)}
     except Exception as e:
         print(f"[WARN] LLM Judge 呼叫或解析失敗: {e}")
         return {"error": str(e)}
