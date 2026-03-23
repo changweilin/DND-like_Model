@@ -24,6 +24,8 @@ import re
 import sys
 import time
 
+os.environ.setdefault("UNSLOTH_CE_LOSS_TARGET_GB", "128")
+
 import torch
 from datasets import load_dataset
 from unsloth import FastLanguageModel, is_bfloat16_supported
@@ -95,6 +97,8 @@ def convert_to_grpo_dataset(dataset, tokenizer):
       - answer     : 原始 gpt 回應（reward function 可用於參考）
       - input_text : human 欄位原始文字（analyst 任務用於實體定位）
     """
+    _ROLE_MAP = {"system": "system", "human": "user", "gpt": "assistant"}
+
     def process(examples):
         prompts, answers, input_texts = [], [], []
         for convos in examples["conversations"]:
@@ -104,9 +108,12 @@ def convert_to_grpo_dataset(dataset, tokenizer):
             gpt_val = next(
                 (c["value"] for c in convos if c["from"] == "gpt"), ""
             )
-            prompt_convos = [c for c in convos if c["from"] != "gpt"]
+            prompt_chatml = [
+                {"role": _ROLE_MAP.get(m["from"], m["from"]), "content": m["value"]}
+                for m in convos if m["from"] != "gpt"
+            ]
             prompt = tokenizer.apply_chat_template(
-                prompt_convos, tokenize=False, add_generation_prompt=True
+                prompt_chatml, tokenize=False, add_generation_prompt=True
             )
             prompts.append(prompt)
             answers.append(gpt_val)

@@ -18,6 +18,10 @@ import re
 import sys
 from pathlib import Path
 
+# Unsloth fused CE loss 需要明確指定 target GB，否則在模型載入後
+# 可用 VRAM 量測時機問題會觸發 RuntimeError。
+os.environ.setdefault("UNSLOTH_CE_LOSS_TARGET_GB", "128")
+
 import torch
 
 # ── API 用量追蹤 ───────────────────────────────────────────────────────────────
@@ -113,6 +117,13 @@ def parse_args():
 
 # ── Perplexity 計算 ───────────────────────────────────────────────────────────
 
+_ROLE_MAP = {"system": "system", "human": "user", "gpt": "assistant"}
+
+def _to_chatml(convos):
+    """ShareGPT from/value → role/content"""
+    return [{"role": _ROLE_MAP.get(m["from"], m["from"]), "content": m["value"]} for m in convos]
+
+
 def compute_perplexity(model, tokenizer, val_path: str) -> float:
     """在驗證集上計算平均 cross-entropy loss，回傳 perplexity。"""
     items = []
@@ -132,7 +143,7 @@ def compute_perplexity(model, tokenizer, val_path: str) -> float:
         for item in items:
             convos = item.get("conversations", [])
             text = tokenizer.apply_chat_template(
-                convos, tokenize=False, add_generation_prompt=False
+                _to_chatml(convos), tokenize=False, add_generation_prompt=False
             )
             inputs = tokenizer(
                 text, return_tensors="pt",
@@ -182,10 +193,10 @@ def get_system_prompt(convos: list[dict]) -> str:
 
 def generate_response(model, tokenizer, convos: list[dict], max_new_tokens: int) -> str:
     FastLanguageModel.for_inference(model)
-    # 構建不含 gpt 回應的 prompt
-    prompt_convos = [c for c in convos if c.get("from") != "gpt"]
+    # 構建不含 gpt 回應的 prompt，並轉換為 role/content 格式
+    prompt_chatml = _to_chatml([c for c in convos if c.get("from") != "gpt"])
     text = tokenizer.apply_chat_template(
-        prompt_convos, tokenize=False, add_generation_prompt=True
+        prompt_chatml, tokenize=False, add_generation_prompt=True
     )
     inputs = tokenizer(text, return_tensors="pt", truncation=True,
                        max_length=MAX_SEQ_LENGTH).to(model.device)

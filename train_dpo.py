@@ -25,6 +25,8 @@ import os
 import sys
 import time
 
+os.environ.setdefault("UNSLOTH_CE_LOSS_TARGET_GB", "128")
+
 import torch
 from datasets import load_dataset
 from unsloth import FastLanguageModel, is_bfloat16_supported
@@ -71,6 +73,8 @@ def convert_to_dpo_dataset(dataset, tokenizer):
         "rejected": "（低品質回應）"
       }
     """
+    _ROLE_MAP = {"system": "system", "human": "user", "gpt": "assistant"}
+
     def process(examples):
         prompts, chosens, rejecteds = [], [], []
         for convos, chosen_obj, rejected_obj in zip(
@@ -78,8 +82,12 @@ def convert_to_dpo_dataset(dataset, tokenizer):
             examples["chosen"],
             examples["rejected"],
         ):
+            prompt_chatml = [
+                {"role": _ROLE_MAP.get(m["from"], m["from"]), "content": m["value"]}
+                for m in convos
+            ]
             prompt = tokenizer.apply_chat_template(
-                convos, tokenize=False, add_generation_prompt=True
+                prompt_chatml, tokenize=False, add_generation_prompt=True
             )
             prompts.append(prompt)
             chosens.append(chosen_obj["value"])

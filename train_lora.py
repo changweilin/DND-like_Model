@@ -17,6 +17,8 @@ import os
 import sys
 import time
 
+os.environ.setdefault("UNSLOTH_CE_LOSS_TARGET_GB", "128")
+
 import torch
 from datasets import load_dataset
 from unsloth import FastLanguageModel, is_bfloat16_supported
@@ -94,11 +96,17 @@ def parse_args():
 
 # ── 資料格式化 ────────────────────────────────────────────────────────────────
 
+_ROLE_MAP = {"system": "system", "human": "user", "gpt": "assistant"}
+
+def _to_chatml(convos):
+    """ShareGPT from/value → role/content"""
+    return [{"role": _ROLE_MAP.get(m["from"], m["from"]), "content": m["value"]} for m in convos]
+
 def make_formatting_func(tokenizer):
     def formatting_prompts_func(examples):
         convos = examples["conversations"]
         texts = [
-            tokenizer.apply_chat_template(convo, tokenize=False, add_generation_prompt=False)
+            tokenizer.apply_chat_template(_to_chatml(convo), tokenize=False, add_generation_prompt=False)
             for convo in convos
         ]
         return {"text": texts}
