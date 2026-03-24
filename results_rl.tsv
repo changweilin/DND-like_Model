@@ -1,0 +1,2 @@
+timestamp	task	mode	rank	alpha	lr	num_generations	max_completion	kl_coeff	epochs	max_steps	train_loss	peak_memory_gb	elapsed_sec	sft_adapter	status
+2026-03-24T12:52:55	analyst	grpo	8	16	1e-05	4	64	0.05	3	20	0.0002	16.85	48279.5	none	ok
