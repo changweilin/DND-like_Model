@@ -219,11 +219,14 @@ def export_gguf(task, quant, dry_run, prefer_rl=False):
     src_adapter = adapter_dir(task, prefer_rl)
     _log("INFO", "使用 adapter：%s", src_adapter)
 
+    # device_map="auto" 會將部分層 offload 至 CPU，但 bitsandbytes 4-bit 不支援此行為。
+    # 強制所有層置於 GPU（4-bit 7B ≈ 4-5 GB，12 GB VRAM 足夠）。
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=str(src_adapter),
         max_seq_length=MAX_SEQ_LEN,
         dtype=None,
         load_in_4bit=True,
+        device_map={"": 0},
     )
 
     _log("STEP", "合併 LoRA 並匯出 GGUF（quant=%s）…", quant)
@@ -323,6 +326,14 @@ def update_rpg_config(ollama_name, dry_run):
 
 # ── 單一任務部署流程 ───────────────────────────────────────────────────────────
 
+def _cleanup_gguf_dir(d: pathlib.Path) -> None:
+    """刪除 GGUF 匯出目錄（Ollama 已複製 GGUF，來源不再需要）。"""
+    import shutil
+    if d.exists():
+        shutil.rmtree(d, ignore_errors=True)
+        _log("INFO", "已清理 GGUF 目錄（磁碟空間回收）：%s", d)
+
+
 def deploy_task(task, quant, update_config, dry_run, state, force, prefer_rl=False):
     _log("STEP", "═══ 開始部署 task=%s  quant=%s  rl=%s ═══", task, quant, prefer_rl)
 
@@ -365,6 +376,10 @@ def deploy_task(task, quant, update_config, dry_run, state, force, prefer_rl=Fal
     if not dry_run:
         state.record(task, ollama_name, quant, gguf_path, adapter_mtime(task, prefer_rl))
         state.save()
+
+    # 8. 清理 GGUF 目錄（Ollama 已複製至自身 blob 存儲，來源可刪除）
+    if not dry_run:
+        _cleanup_gguf_dir(gguf_dir(task))
 
     _log("OK", "task=%s 部署完成 → ollama 模型名稱：%s", task, ollama_model_name(task))
     return True
