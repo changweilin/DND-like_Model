@@ -42,6 +42,14 @@ TASKS = ["analyst", "reasoning", "translator", "storyteller", "storyteller_extra
 QUANT_METHODS = ["q4_k_m", "q5_k_m", "q8_0", "f16"]
 DEFAULT_QUANT = "q4_k_m"
 
+# RL adapter 目錄對照表（task → RL adapter dir suffix）
+RL_ADAPTER_SUFFIX = {
+    "analyst":    "lora_analyst_grpo",
+    "reasoning":  "lora_reasoning_grpo",
+    "translator": "lora_translator_grpo",
+    "storyteller": "lora_storyteller_dpo",
+}
+
 # Ollama 模型命名規則：dnd-{task}
 def ollama_model_name(task):
     return f"dnd-{task.replace('_', '-')}"
@@ -153,16 +161,20 @@ class DeployState:
 
 # ── Adapter 驗證 ───────────────────────────────────────────────────────────────
 
-def adapter_dir(task):
+def adapter_dir(task, prefer_rl=False):
+    if prefer_rl and task in RL_ADAPTER_SUFFIX:
+        rl_dir = OUTPUTS_DIR / RL_ADAPTER_SUFFIX[task]
+        if rl_dir.exists():
+            return rl_dir
     return OUTPUTS_DIR / f"lora_{task}"
 
 
-def check_adapter(task):
+def check_adapter(task, prefer_rl=False):
     """
     回傳 (ok: bool, reason: str)。
     ok=True 表示 adapter 完整可用。
     """
-    d = adapter_dir(task)
+    d = adapter_dir(task, prefer_rl)
     if not d.exists():
         return False, f"目錄不存在：{d}"
     required = ["adapter_config.json", "adapter_model.safetensors"]
@@ -172,8 +184,8 @@ def check_adapter(task):
     return True, "OK"
 
 
-def adapter_mtime(task):
-    f = adapter_dir(task) / "adapter_model.safetensors"
+def adapter_mtime(task, prefer_rl=False):
+    f = adapter_dir(task, prefer_rl) / "adapter_model.safetensors"
     return f.stat().st_mtime if f.exists() else 0.0
 
 
@@ -183,7 +195,7 @@ def gguf_dir(task):
     return OUTPUTS_DIR / f"gguf_{task}"
 
 
-def export_gguf(task, quant, dry_run):
+def export_gguf(task, quant, dry_run, prefer_rl=False):
     """
     使用 Unsloth 載入 base model + LoRA adapter，合併並匯出 GGUF。
     回傳 gguf_path (Path) 或在失敗時 raise RuntimeError。
@@ -204,7 +216,8 @@ def export_gguf(task, quant, dry_run):
             "找不到 unsloth 套件。請先安裝：pip install unsloth"
         )
 
-    src_adapter = adapter_dir(task)
+    src_adapter = adapter_dir(task, prefer_rl)
+    _log("INFO", "使用 adapter：%s", src_adapter)
 
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=str(src_adapter),
@@ -310,17 +323,17 @@ def update_rpg_config(ollama_name, dry_run):
 
 # ── 單一任務部署流程 ───────────────────────────────────────────────────────────
 
-def deploy_task(task, quant, update_config, dry_run, state, force):
-    _log("STEP", "═══ 開始部署 task=%s  quant=%s ═══", task, quant)
+def deploy_task(task, quant, update_config, dry_run, state, force, prefer_rl=False):
+    _log("STEP", "═══ 開始部署 task=%s  quant=%s  rl=%s ═══", task, quant, prefer_rl)
 
     # 1. 驗證 adapter
-    ok, reason = check_adapter(task)
+    ok, reason = check_adapter(task, prefer_rl)
     if not ok:
         _log("ERROR", "Adapter 不完整，跳過（%s）", reason)
         return False
 
     # 2. 檢查是否已部署且為最新（除非 --force）
-    if not force and state.is_up_to_date(task, adapter_dir(task), quant):
+    if not force and state.is_up_to_date(task, adapter_dir(task, prefer_rl), quant):
         _log("INFO", "已部署且 adapter 未變更，跳過（--force 可強制重新部署）")
         entry = state.get(task)
         if entry:
@@ -329,7 +342,7 @@ def deploy_task(task, quant, update_config, dry_run, state, force):
 
     # 3. 匯出 GGUF
     try:
-        gguf_path = export_gguf(task, quant, dry_run)
+        gguf_path = export_gguf(task, quant, dry_run, prefer_rl)
     except RuntimeError as e:
         _log("ERROR", "GGUF 匯出失敗：%s", e)
         return False
@@ -350,7 +363,7 @@ def deploy_task(task, quant, update_config, dry_run, state, force):
 
     # 7. 記錄狀態
     if not dry_run:
-        state.record(task, ollama_name, quant, gguf_path, adapter_mtime(task))
+        state.record(task, ollama_name, quant, gguf_path, adapter_mtime(task, prefer_rl))
         state.save()
 
     _log("OK", "task=%s 部署完成 → ollama 模型名稱：%s", task, ollama_model_name(task))
@@ -442,6 +455,10 @@ def parse_args():
         help="模擬執行，顯示操作但不實際匯出或部署",
     )
     parser.add_argument(
+        "--rl", action="store_true",
+        help="優先使用 RL adapter（GRPO/DPO），若不存在則回退至 SFT adapter",
+    )
+    parser.add_argument(
         "--reset", metavar="TASK", choices=TASKS,
         help="重置指定任務的部署記錄（不刪除 GGUF）",
     )
@@ -473,7 +490,7 @@ def main():
     if args.all:
         results = {}
         for task in TASKS:
-            ok, _ = check_adapter(task)
+            ok, _ = check_adapter(task, args.rl)
             if not ok:
                 _log("INFO", "task=%s 沒有 adapter，跳過", task)
                 results[task] = "skip"
@@ -485,6 +502,7 @@ def main():
                 dry_run=args.dry_run,
                 state=state,
                 force=args.force,
+                prefer_rl=args.rl,
             )
             results[task] = "ok" if success else "fail"
 
@@ -517,6 +535,7 @@ def main():
         dry_run=args.dry_run,
         state=state,
         force=args.force,
+        prefer_rl=args.rl,
     )
     sys.exit(0 if success else 1)
 
