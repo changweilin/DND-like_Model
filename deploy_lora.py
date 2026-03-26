@@ -22,6 +22,7 @@ import argparse
 import datetime
 import json
 import os
+import sys
 import pathlib
 import re
 import subprocess
@@ -195,32 +196,47 @@ def gguf_dir(task):
     return OUTPUTS_DIR / f"gguf_{task}"
 
 
+LLAMA_CPP_DIR = pathlib.Path("C:/Users/user/llama.cpp")
+CONVERT_SCRIPT = LLAMA_CPP_DIR / "convert_hf_to_gguf.py"
+
+
 def export_gguf(task, quant, dry_run, prefer_rl=False):
     """
-    使用 Unsloth 載入 base model + LoRA adapter，合併並匯出 GGUF。
+    Merge LoRA → float16 safetensors via Unsloth, then convert to GGUF
+    using llama.cpp's convert_hf_to_gguf.py (pure Python, no compiled binary).
+    Quantization is done in the same step (q8_0 supported natively; q4_k_m
+    falls back to q8_0 since llama-quantize is not built).
     回傳 gguf_path (Path) 或在失敗時 raise RuntimeError。
     """
+    # q4_k_m requires compiled llama-quantize; fall back to q8_0 (Python-only)
+    gguf_quant = quant if quant in ("f16", "bf16", "f32", "q8_0") else "q8_0"
+    if gguf_quant != quant:
+        _log("WARN", "llama-quantize 未編譯，改用 %s（原請求：%s）", gguf_quant, quant)
+
     out_dir = gguf_dir(task)
-    gguf_path = out_dir / gguf_filename(quant)
+    merge_dir = out_dir / "merged_f16"
+    gguf_path = out_dir / f"model-{gguf_quant.upper()}.gguf"
 
     if dry_run:
         _log("INFO", "[DRY-RUN] 跳過 GGUF 匯出：%s", gguf_path)
         return gguf_path
 
-    _log("STEP", "載入 base model + LoRA adapter（task=%s）…", task)
+    # 強制離線模式（set early so all HF calls in this process use cache only）
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    os.environ["TRANSFORMERS_OFFLINE"] = "1"
+    os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
 
+    _log("STEP", "載入 base model + LoRA adapter（task=%s）…", task)
     try:
         from unsloth import FastLanguageModel
     except ImportError:
-        raise RuntimeError(
-            "找不到 unsloth 套件。請先安裝：pip install unsloth"
-        )
+        raise RuntimeError("找不到 unsloth 套件。請先安裝：pip install unsloth")
 
     src_adapter = adapter_dir(task, prefer_rl)
     _log("INFO", "使用 adapter：%s", src_adapter)
 
-    # device_map="auto" 會將部分層 offload 至 CPU，但 bitsandbytes 4-bit 不支援此行為。
-    # 強制所有層置於 GPU（4-bit 7B ≈ 4-5 GB，12 GB VRAM 足夠）。
+    # Force all 4-bit layers onto GPU (device_map="auto" causes CPU offload which
+    # bitsandbytes 4-bit does not support)
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=str(src_adapter),
         max_seq_length=MAX_SEQ_LEN,
@@ -229,22 +245,42 @@ def export_gguf(task, quant, dry_run, prefer_rl=False):
         device_map={"": 0},
     )
 
-    _log("STEP", "合併 LoRA 並匯出 GGUF（quant=%s）…", quant)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    # Step 1: merge LoRA into float16 safetensors locally
+    _log("STEP", "合併 LoRA 至 float16 safetensors → %s …", merge_dir)
+    merge_dir.mkdir(parents=True, exist_ok=True)
+    model.save_pretrained_merged(str(merge_dir), tokenizer, save_method="merged_16bit")
 
-    model.save_pretrained_gguf(
-        str(out_dir),
-        tokenizer,
-        quantization_method=quant,
+    # Verify all shards were written
+    import json as _json
+    idx_file = merge_dir / "model.safetensors.index.json"
+    if idx_file.exists():
+        with idx_file.open() as _f:
+            expected = set(_json.load(_f)["weight_map"].values())
+        missing = [s for s in expected if not (merge_dir / s).exists()]
+        if missing:
+            raise RuntimeError(f"Merge 不完整，缺少 shards：{missing}")
+    elif not (merge_dir / "model.safetensors").exists():
+        raise RuntimeError(f"Merge 失敗：找不到 safetensors 於 {merge_dir}")
+
+    # Step 2: convert to GGUF using llama.cpp Python script
+    _log("STEP", "轉換 GGUF（%s）via convert_hf_to_gguf.py …", gguf_quant)
+    import subprocess as _sub
+    result = _sub.run(
+        [sys.executable, str(CONVERT_SCRIPT),
+         str(merge_dir),
+         "--outtype", gguf_quant,
+         "--outfile", str(gguf_path)],
+        capture_output=True, text=True,
     )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"convert_hf_to_gguf.py 失敗（exit {result.returncode}）:\n{result.stderr[-500:]}"
+        )
 
-    if not gguf_path.exists():
-        # Unsloth 有時用不同大小寫；找最近產生的 .gguf
-        candidates = sorted(out_dir.glob("*.gguf"), key=lambda p: p.stat().st_mtime, reverse=True)
-        if not candidates:
-            raise RuntimeError(f"GGUF 匯出完成但找不到 .gguf 檔案於：{out_dir}")
-        gguf_path = candidates[0]
-        _log("WARN", "GGUF 檔案名稱與預期不同，使用：%s", gguf_path.name)
+    # Step 3: remove float16 shards to reclaim ~14 GB
+    import shutil as _shutil
+    _shutil.rmtree(merge_dir, ignore_errors=True)
+    _log("INFO", "已刪除 float16 中間檔（~14 GB 回收）")
 
     size_gb = gguf_path.stat().st_size / 1_073_741_824
     _log("OK", "GGUF 匯出完成：%s  (%.2f GB)", gguf_path, size_gb)
