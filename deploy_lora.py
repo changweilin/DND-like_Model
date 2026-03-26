@@ -221,9 +221,6 @@ def export_gguf(task, quant, dry_run, prefer_rl=False):
         _log("INFO", "[DRY-RUN] 跳過 GGUF 匯出：%s", gguf_path)
         return gguf_path
 
-    # 強制離線模式（set early so all HF calls in this process use cache only）
-    os.environ["HF_HUB_OFFLINE"] = "1"
-    os.environ["TRANSFORMERS_OFFLINE"] = "1"
     os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
 
     _log("STEP", "載入 base model + LoRA adapter（task=%s）…", task)
