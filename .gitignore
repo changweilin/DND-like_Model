@@ -1,9 +1,26 @@
-dataset
-outputs
+dataset/
+outputs/
 
 # Python bytecode
 __pycache__/
 *.py[cod]
 *.pyo
 
-logs
+logs/
+*.log
+
+# 模型權重（可能數 GB，不應進 git）
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+*.gguf
+
+# 訓練中間產物
+checkpoint-*/
+wandb/
+runs/
+
+# 自動產生的評估基準
+pipeline_baseline.json
